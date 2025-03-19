@@ -12,25 +12,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Shield, User } from 'lucide-react';
+import { useContacts } from '@/hooks/useContacts';
 
 type AddContactDialogProps = {
   isOpen: boolean;
   onClose: () => void;
-  onAddContact: (name: string, email: string) => void;
 };
 
 const AddContactDialog: React.FC<AddContactDialogProps> = ({ 
   isOpen, 
-  onClose, 
-  onAddContact 
+  onClose
 }) => {
+  const { addContact } = useContacts();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [enableEncryption, setEnableEncryption] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Simple validation
@@ -53,9 +54,31 @@ const AddContactDialog: React.FC<AddContactDialogProps> = ({
     
     // Clear error and add contact
     setError(null);
-    onAddContact(name, email);
+    setIsSubmitting(true);
     
-    // Reset form
+    try {
+      const result = await addContact({
+        name,
+        email,
+        phone: phone || undefined,
+        is_encrypted: enableEncryption,
+        status: undefined,
+        avatar_url: undefined
+      });
+      
+      if (result) {
+        resetForm();
+        onClose();
+      }
+    } catch (error) {
+      console.error('Error adding contact:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const resetForm = () => {
+    setError(null);
     setName('');
     setEmail('');
     setPhone('');
@@ -63,11 +86,7 @@ const AddContactDialog: React.FC<AddContactDialogProps> = ({
   };
 
   const handleClose = () => {
-    setError(null);
-    setName('');
-    setEmail('');
-    setPhone('');
-    setEnableEncryption(true);
+    resetForm();
     onClose();
   };
 
@@ -139,10 +158,15 @@ const AddContactDialog: React.FC<AddContactDialogProps> = ({
           </div>
           
           <DialogFooter className="mt-6">
-            <Button type="button" variant="outline" onClick={handleClose}>
+            <Button type="button" variant="outline" onClick={handleClose} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit">Add Contact</Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+              ) : null}
+              Add Contact
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

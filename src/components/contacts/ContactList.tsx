@@ -1,55 +1,7 @@
 
 import React from 'react';
-import { User, UserPlus, Clock, Shield, Mail, Phone, Video } from 'lucide-react';
-
-// Mock data for contacts
-const mockContacts = [
-  {
-    id: '1',
-    name: 'Alice Smith',
-    email: 'alice@example.com',
-    status: 'online',
-    avatar: '',
-    lastActive: new Date(),
-    isEncrypted: true
-  },
-  {
-    id: '2',
-    name: 'Bob Johnson',
-    email: 'bob@example.com',
-    status: 'away',
-    avatar: '',
-    lastActive: new Date(Date.now() - 3600000), // 1 hour ago
-    isEncrypted: true
-  },
-  {
-    id: '3',
-    name: 'Charlie Brown',
-    email: 'charlie@example.com',
-    status: 'offline',
-    avatar: '',
-    lastActive: new Date(Date.now() - 86400000), // 1 day ago
-    isEncrypted: false
-  },
-  {
-    id: '4',
-    name: 'Diana Prince',
-    email: 'diana@example.com',
-    status: 'busy',
-    avatar: '',
-    lastActive: new Date(Date.now() - 900000), // 15 minutes ago
-    isEncrypted: true
-  },
-  {
-    id: '5',
-    name: 'Ethan Hunt',
-    email: 'ethan@example.com',
-    status: 'online',
-    avatar: '',
-    lastActive: new Date(Date.now() - 300000), // 5 minutes ago
-    isEncrypted: true
-  }
-];
+import { User, UserPlus, Clock, Shield, Mail, Phone } from 'lucide-react';
+import { useContacts, Contact } from '@/hooks/useContacts';
 
 type ContactListProps = {
   searchQuery: string;
@@ -62,16 +14,20 @@ const ContactList: React.FC<ContactListProps> = ({
   selectedContactId,
   onSelectContact,
 }) => {
+  const { contacts, isLoading } = useContacts();
+
   // Filter contacts based on search query
-  const filteredContacts = mockContacts.filter(contact => 
+  const filteredContacts = contacts.filter(contact => 
     contact.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    contact.email.toLowerCase().includes(searchQuery.toLowerCase())
+    contact.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (contact.phone && contact.phone.includes(searchQuery))
   );
 
   // Format time elapsed
-  const formatTimeElapsed = (date: Date) => {
+  const formatTimeElapsed = (date: string) => {
     const now = new Date();
-    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    const messageDate = new Date(date);
+    const diffInSeconds = Math.floor((now.getTime() - messageDate.getTime()) / 1000);
     
     if (diffInSeconds < 60) {
       return 'Just now';
@@ -83,6 +39,14 @@ const ContactList: React.FC<ContactListProps> = ({
       return `${Math.floor(diffInSeconds / 86400)}d ago`;
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="w-72 flex-shrink-0 border-r border-border p-4 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-72 flex-shrink-0 border-r border-border overflow-y-auto">
@@ -98,9 +62,9 @@ const ContactList: React.FC<ContactListProps> = ({
             >
               <div className="flex items-center gap-3">
                 <div className="relative">
-                  {contact.avatar ? (
+                  {contact.avatar_url ? (
                     <img 
-                      src={contact.avatar} 
+                      src={contact.avatar_url} 
                       alt={contact.name} 
                       className="w-10 h-10 rounded-full object-cover"
                     />
@@ -119,13 +83,13 @@ const ContactList: React.FC<ContactListProps> = ({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
                     <p className="font-medium truncate">{contact.name}</p>
-                    {contact.isEncrypted && (
+                    {contact.is_encrypted && (
                       <Shield className="w-3.5 h-3.5 text-primary shrink-0" />
                     )}
                   </div>
                   <div className="flex items-center text-xs text-muted-foreground mt-0.5">
                     <Clock className="w-3.5 h-3.5 mr-1" />
-                    <span>{formatTimeElapsed(contact.lastActive)}</span>
+                    <span>{formatTimeElapsed(contact.created_at)}</span>
                   </div>
                 </div>
               </div>

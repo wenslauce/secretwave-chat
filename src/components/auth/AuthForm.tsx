@@ -11,6 +11,7 @@ const AuthForm: React.FC = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const { login, signup } = useAuth();
@@ -21,6 +22,7 @@ const AuthForm: React.FC = () => {
     setName('');
     setEmail('');
     setPassword('');
+    setConfirmPassword('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -30,27 +32,19 @@ const AuthForm: React.FC = () => {
     try {
       if (mode === 'login') {
         await login(email, password);
-        toast({
-          title: "Welcome back",
-          description: "You've successfully logged in.",
-        });
       } else {
         if (!name.trim()) {
           throw new Error('Name is required');
         }
+        if (password !== confirmPassword) {
+          throw new Error('Passwords do not match');
+        }
+        if (password.length < 6) {
+          throw new Error('Password must be at least 6 characters');
+        }
         await signup(name, email, password);
-        toast({
-          title: "Account created",
-          description: "Your account has been successfully created.",
-        });
       }
     } catch (error) {
-      toast({
-        title: "Authentication error",
-        description: error instanceof Error ? error.message : "An unexpected error occurred",
-        variant: "destructive",
-      });
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -128,10 +122,33 @@ const AuthForm: React.FC = () => {
                 className="w-full pl-10 py-2 bg-background border border-input rounded-lg focus:ring-2 focus:ring-ring focus:border-input transition-all duration-200"
                 placeholder="••••••••"
                 required
-                minLength={8}
+                minLength={6}
               />
             </div>
           </div>
+
+          {mode === 'signup' && (
+            <div className="space-y-2">
+              <label htmlFor="confirmPassword" className="text-sm font-medium">
+                Confirm Password
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-muted-foreground">
+                  <Lock size={18} />
+                </div>
+                <input
+                  type="password"
+                  id="confirmPassword"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full pl-10 py-2 bg-background border border-input rounded-lg focus:ring-2 focus:ring-ring focus:border-input transition-all duration-200"
+                  placeholder="••••••••"
+                  required
+                  minLength={6}
+                />
+              </div>
+            </div>
+          )}
 
           <button
             type="submit"

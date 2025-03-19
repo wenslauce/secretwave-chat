@@ -1,14 +1,16 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from "@/components/ui/button";
 import { 
   MessageSquare, Settings, Users, LogOut, 
-  Lock, User, Phone, Bell, Moon, Search, 
+  Lock, User, Phone, Search, 
   ArrowLeft, Shield, Video, History
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { useConversations } from '@/hooks/useConversations';
+import { initPresence, updateUserStatus, cleanupPresence } from '@/services/presenceService';
 
 type SidebarProps = {
   onSelectContact?: (contactId: string) => void;
@@ -16,54 +18,27 @@ type SidebarProps = {
   activeLink?: string;
 };
 
-// Mock data for contacts
-const mockContacts = [
-  {
-    id: '1',
-    name: 'Alice Smith',
-    status: 'online',
-    avatar: '',
-    unreadCount: 3
-  },
-  {
-    id: '2',
-    name: 'Bob Johnson',
-    status: 'away',
-    avatar: '',
-    unreadCount: 0
-  },
-  {
-    id: '3',
-    name: 'Charlie Brown',
-    status: 'offline',
-    avatar: '',
-    unreadCount: 0
-  },
-  {
-    id: '4',
-    name: 'Diana Prince',
-    status: 'busy',
-    avatar: '',
-    unreadCount: 1
-  },
-  {
-    id: '5',
-    name: 'Ethan Hunt',
-    status: 'online',
-    avatar: '',
-    unreadCount: 0
-  }
-];
-
 const Sidebar: React.FC<SidebarProps> = ({ 
   onSelectContact = () => {}, 
   selectedContactId,
   activeLink
 }) => {
-  const { user, logout } = useAuth();
+  const { user, profile, logout } = useAuth();
+  const { conversations, isLoadingConversations, setActiveConversation } = useConversations();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
   const location = useLocation();
+  
+  // Initialize presence tracking when user is authenticated
+  useEffect(() => {
+    if (user) {
+      initPresence(user.id);
+      
+      return () => {
+        cleanupPresence();
+      };
+    }
+  }, [user]);
   
   // Determine if we're on the home/chat page
   const isHomePage = location.pathname === '/';
@@ -77,14 +52,26 @@ const Sidebar: React.FC<SidebarProps> = ({
     return "text-muted-foreground hover:bg-secondary";
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    if (user) {
+      // Set status to offline before logging out
+      await updateUserStatus(user.id, 'offline');
+    }
+    await logout();
     setIsLogoutDialogOpen(false);
   };
 
   const toggleMobileMenu = () => {
     setIsMobileMenuOpen(!isMobileMenuOpen);
   };
+
+  const handleConversationSelect = (conversation: any) => {
+    setActiveConversation(conversation);
+  };
+  
+  if (!user) {
+    return null;
+  }
   
   return (
     <>
@@ -108,11 +95,19 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div className="p-4 border-b border-border">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-              <User className="w-5 h-5 text-primary" />
+              {profile?.avatar_url ? (
+                <img 
+                  src={profile.avatar_url} 
+                  alt={profile.name || 'User'} 
+                  className="w-10 h-10 rounded-full object-cover"
+                />
+              ) : (
+                <User className="w-5 h-5 text-primary" />
+              )}
             </div>
             <div>
-              <h3 className="font-medium">{user?.name || 'User'}</h3>
-              <p className="text-xs text-muted-foreground">{user?.email || 'user@example.com'}</p>
+              <h3 className="font-medium">{profile?.name || user?.email || 'User'}</h3>
+              <p className="text-xs text-muted-foreground">{user?.email || ''}</p>
             </div>
           </div>
         </div>
@@ -168,45 +163,70 @@ const Sidebar: React.FC<SidebarProps> = ({
               <button className="text-xs text-primary hover:underline">View All</button>
             </div>
             
-            <div className="space-y-1">
-              {mockContacts.map(contact => (
-                <button
-                  key={contact.id}
-                  className={`w-full flex items-center gap-3 p-2 rounded-md ${
-                    selectedContactId === contact.id ? 'bg-secondary' : 'hover:bg-secondary/50'
-                  }`}
-                  onClick={() => onSelectContact(contact.id)}
-                >
-                  <div className="relative">
-                    {contact.avatar ? (
-                      <img 
-                        src={contact.avatar} 
-                        alt={contact.name} 
-                        className="w-8 h-8 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                        <User className="w-4 h-4 text-primary" />
+            {isLoadingConversations ? (
+              <div className="flex justify-center py-4">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            ) : conversations.length > 0 ? (
+              <div className="space-y-1">
+                {conversations.map(conversation => {
+                  // For direct chats, find the other participant
+                  const otherParticipant = !conversation.is_group 
+                    ? conversation.participants.find(p => p.user_id !== user?.id)
+                    : null;
+
+                  return (
+                    <button
+                      key={conversation.id}
+                      className={`w-full flex items-center gap-3 p-2 rounded-md ${
+                        selectedContactId === conversation.id ? 'bg-secondary' : 'hover:bg-secondary/50'
+                      }`}
+                      onClick={() => handleConversationSelect(conversation)}
+                    >
+                      <div className="relative">
+                        {otherParticipant?.avatar_url ? (
+                          <img 
+                            src={otherParticipant.avatar_url} 
+                            alt={conversation.name || 'Chat'} 
+                            className="w-8 h-8 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                            {conversation.is_group ? (
+                              <Users className="w-4 h-4 text-primary" />
+                            ) : (
+                              <User className="w-4 h-4 text-primary" />
+                            )}
+                          </div>
+                        )}
+                        {otherParticipant && (
+                          <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-background ${
+                            otherParticipant.status === 'online' ? 'bg-green-500' :
+                            otherParticipant.status === 'away' ? 'bg-yellow-500' :
+                            otherParticipant.status === 'busy' ? 'bg-red-500' :
+                            'bg-gray-500'
+                          }`} />
+                        )}
                       </div>
-                    )}
-                    <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-background ${
-                      contact.status === 'online' ? 'bg-green-500' :
-                      contact.status === 'away' ? 'bg-yellow-500' :
-                      contact.status === 'busy' ? 'bg-red-500' :
-                      'bg-gray-500'
-                    }`} />
-                  </div>
-                  <div className="flex-1 text-left">
-                    <p className="text-sm truncate">{contact.name}</p>
-                  </div>
-                  {contact.unreadCount > 0 && (
-                    <div className="w-5 h-5 rounded-full bg-primary text-[10px] flex items-center justify-center text-primary-foreground">
-                      {contact.unreadCount}
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
+                      <div className="flex-1 text-left">
+                        <p className="text-sm truncate">
+                          {conversation.name || otherParticipant?.name || 'Unknown'}
+                        </p>
+                      </div>
+                      {conversation.unread_count > 0 && (
+                        <div className="w-5 h-5 rounded-full bg-primary text-[10px] flex items-center justify-center text-primary-foreground">
+                          {conversation.unread_count}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-4 text-muted-foreground text-sm">
+                No conversations yet
+              </div>
+            )}
           </div>
         )}
         

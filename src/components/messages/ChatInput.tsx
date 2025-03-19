@@ -2,20 +2,20 @@
 import React, { useState, useRef } from 'react';
 import { Paperclip, Clock, Send, Smile, Lock, X, TimerReset } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { useConversations } from '@/hooks/useConversations';
 
 type ChatInputProps = {
-  onSendMessage: (content: string, selfDestruct?: number) => void;
-  onSendAttachment?: (file: File) => void;
+  conversationId: string;
 };
 
-const ChatInput: React.FC<ChatInputProps> = ({ 
-  onSendMessage,
-  onSendAttachment
-}) => {
+const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
+  const { sendMessage, uploadAttachment } = useConversations();
   const [message, setMessage] = useState('');
   const [isSelfDestructEnabled, setIsSelfDestructEnabled] = useState(false);
   const [selfDestructTime, setSelfDestructTime] = useState(60); // 60 seconds default
   const [showSelfDestructMenu, setShowSelfDestructMenu] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -25,18 +25,31 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     const trimmedMessage = message.trim();
-    if (!trimmedMessage) return;
+    if (!trimmedMessage || isSending) return;
     
-    onSendMessage(
-      trimmedMessage, 
-      isSelfDestructEnabled ? selfDestructTime : undefined
-    );
-    setMessage('');
+    setIsSending(true);
+    
+    try {
+      const result = await sendMessage(
+        conversationId, 
+        trimmedMessage, 
+        isSelfDestructEnabled ? selfDestructTime : undefined
+      );
+      
+      if (result) {
+        setMessage('');
+        setIsSelfDestructEnabled(false);
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+    } finally {
+      setIsSending(false);
+    }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || !files.length) return;
     
@@ -51,13 +64,36 @@ const ChatInput: React.FC<ChatInputProps> = ({
       return;
     }
 
-    if (onSendAttachment) {
-      onSendAttachment(file);
-    }
+    setIsUploading(true);
     
-    // Reset the input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+    try {
+      // First send an empty message to get a message ID
+      const messageResult = await sendMessage(conversationId, "");
+      
+      if (messageResult && messageResult.id) {
+        // Then upload the attachment linked to this message
+        const attachmentResult = await uploadAttachment(file, messageResult.id);
+        
+        if (!attachmentResult) {
+          throw new Error("Failed to upload attachment");
+        }
+      } else {
+        throw new Error("Failed to create message for attachment");
+      }
+    } catch (error) {
+      console.error('Error sending attachment:', error);
+      toast({
+        title: "Error uploading file",
+        description: "Failed to upload the file. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+      
+      // Reset the input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -84,7 +120,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       
       {/* Self-destruct menu */}
       {showSelfDestructMenu && (
-        <div className="absolute bottom-full mb-2 right-4 glass-card rounded-lg shadow-lg p-2 animate-fade-in">
+        <div className="absolute bottom-full mb-2 right-4 glass-card rounded-lg shadow-lg p-2 animate-fade-in z-10">
           <div className="p-2 border-b border-border mb-1">
             <h4 className="text-sm font-medium">Self-destruct timer</h4>
           </div>
@@ -128,8 +164,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
           onClick={() => fileInputRef.current?.click()}
           className="p-2 rounded-full hover:bg-secondary/50 transition-colors"
           aria-label="Attach file"
+          disabled={isUploading}
         >
-          <Paperclip className="w-5 h-5" />
+          {isUploading ? (
+            <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+          ) : (
+            <Paperclip className="w-5 h-5" />
+          )}
         </button>
         
         <div className="relative flex-1">
@@ -140,6 +181,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             placeholder="Type a secure message..."
             className="w-full text-sm resize-none bg-transparent border-0 focus:ring-0 min-h-[44px] max-h-[150px] py-3 px-3 outline-none"
             rows={1}
+            disabled={isSending}
           />
           
           {/* Encryption indicator */}
@@ -167,6 +209,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 : 'hover:bg-secondary/50'
             }`}
             aria-label="Set self-destruct timer"
+            disabled={isSending}
           >
             <TimerReset className="w-5 h-5" />
           </button>
@@ -174,15 +217,19 @@ const ChatInput: React.FC<ChatInputProps> = ({
           {/* Send button */}
           <button
             onClick={handleSendMessage}
-            disabled={!message.trim()}
+            disabled={!message.trim() || isSending}
             className={`p-2 rounded-full transition-colors ${
-              message.trim() 
+              message.trim() && !isSending
                 ? 'bg-primary text-primary-foreground' 
                 : 'bg-muted text-muted-foreground cursor-not-allowed'
             }`}
             aria-label="Send message"
           >
-            <Send className="w-5 h-5" />
+            {isSending ? (
+              <div className="w-5 h-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              <Send className="w-5 h-5" />
+            )}
           </button>
         </div>
       </div>
