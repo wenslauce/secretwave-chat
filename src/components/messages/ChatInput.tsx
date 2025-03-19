@@ -1,259 +1,294 @@
 
-import React, { useState, useRef } from 'react';
-import { Paperclip, Clock, Send, Smile, Lock, X, TimerReset } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { 
+  PaperclipIcon, SendIcon, SmileIcon, Clock, Mic, Camera, File, Image
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu';
+import EmojiPicker, { EmojiClickData, EmojiStyle } from 'emoji-picker-react';
 import { toast } from '@/hooks/use-toast';
-import { useConversations } from '@/hooks/useConversations';
 
-type ChatInputProps = {
-  conversationId: string;
-};
+interface ChatInputProps {
+  onSendMessage: (content: string, selfDestruct?: number) => void;
+  onSendAttachment?: (file: File) => void;
+  onTyping?: () => void;
+  disabled?: boolean;
+}
 
-const ChatInput: React.FC<ChatInputProps> = ({ conversationId }) => {
-  const { sendMessage, uploadAttachment } = useConversations();
+const ChatInput: React.FC<ChatInputProps> = ({ 
+  onSendMessage, 
+  onSendAttachment,
+  onTyping,
+  disabled
+}) => {
   const [message, setMessage] = useState('');
-  const [isSelfDestructEnabled, setIsSelfDestructEnabled] = useState(false);
-  const [selfDestructTime, setSelfDestructTime] = useState(60); // 60 seconds default
-  const [showSelfDestructMenu, setShowSelfDestructMenu] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isSending, setIsSending] = useState(false);
+  const [selfDestruct, setSelfDestruct] = useState<number | undefined>(undefined);
+  const [isRecording, setIsRecording] = useState(false);
+  const [typingTimeout, setTypingTimeout] = useState<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Focus textarea on mount
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, []);
+
+  const handleSend = () => {
+    if (!message.trim() && !selfDestruct) return;
+    
+    onSendMessage(message.trim(), selfDestruct);
+    setMessage('');
+    setSelfDestruct(undefined);
+    
+    // Focus back on textarea
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  };
+
+  const handleTyping = () => {
+    if (onTyping) {
+      // Clear existing timeout
+      if (typingTimeout) {
+        clearTimeout(typingTimeout);
+      }
+      
+      // Broadcast typing event
+      onTyping();
+      
+      // Set a new timeout
+      const newTimeout = setTimeout(() => {
+        // This timeout will expire if the user hasn't typed in a while
+      }, 3000);
+      
+      setTypingTimeout(newTimeout);
+    }
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      handleSend();
     }
+    
+    handleTyping();
   };
 
-  const handleSendMessage = async () => {
-    const trimmedMessage = message.trim();
-    if (!trimmedMessage || isSending) return;
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!onSendAttachment) return;
     
-    setIsSending(true);
-    
-    try {
-      const result = await sendMessage(
-        conversationId, 
-        trimmedMessage, 
-        isSelfDestructEnabled ? selfDestructTime : undefined
-      );
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const maxSize = 10 * 1024 * 1024; // 10MB
       
-      if (result) {
-        setMessage('');
-        setIsSelfDestructEnabled(false);
+      if (file.size > maxSize) {
+        toast({
+          title: "File too large",
+          description: "The maximum file size is 10MB.",
+          variant: "destructive",
+        });
+        return;
       }
-    } catch (error) {
-      console.error('Error sending message:', error);
-    } finally {
-      setIsSending(false);
+      
+      onSendAttachment(file);
+      
+      // Reset file input
+      e.target.value = '';
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || !files.length) return;
+  const handleEmojiClick = (emojiData: EmojiClickData) => {
+    setMessage(prev => prev + emojiData.emoji);
     
-    const file = files[0];
-    // Max file size: 10MB
-    if (file.size > 10 * 1024 * 1024) {
+    // Focus back on textarea
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  };
+
+  const handleSetSelfDestruct = (minutes: number) => {
+    setSelfDestruct(minutes * 60); // Convert to seconds
+    
+    toast({
+      title: "Self-destruct timer set",
+      description: `This message will self-destruct after ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`,
+    });
+  };
+
+  const handleVoiceRecord = () => {
+    setIsRecording(!isRecording);
+    
+    if (!isRecording) {
       toast({
-        title: "File too large",
-        description: "Maximum file size is 10MB",
-        variant: "destructive",
+        title: "Recording started",
+        description: "Your voice message is being recorded.",
       });
-      return;
-    }
-
-    setIsUploading(true);
-    
-    try {
-      // First send an empty message to get a message ID
-      const messageResult = await sendMessage(conversationId, "");
-      
-      if (messageResult && messageResult.id) {
-        // Then upload the attachment linked to this message
-        const attachmentResult = await uploadAttachment(file, messageResult.id);
-        
-        if (!attachmentResult) {
-          throw new Error("Failed to upload attachment");
-        }
-      } else {
-        throw new Error("Failed to create message for attachment");
-      }
-    } catch (error) {
-      console.error('Error sending attachment:', error);
+    } else {
       toast({
-        title: "Error uploading file",
-        description: "Failed to upload the file. Please try again.",
-        variant: "destructive",
+        title: "Recording stopped",
+        description: "Your voice message has been sent.",
       });
-    } finally {
-      setIsUploading(false);
-      
-      // Reset the input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
   };
 
-  const toggleSelfDestruct = () => {
-    setIsSelfDestructEnabled(!isSelfDestructEnabled);
-    setShowSelfDestructMenu(false);
-  };
-
-  const handleSelfDestructTimeChange = (seconds: number) => {
-    setSelfDestructTime(seconds);
-    setIsSelfDestructEnabled(true);
-    setShowSelfDestructMenu(false);
+  const handleCameraClick = () => {
+    toast({
+      title: "Camera feature",
+      description: "The camera feature is not yet implemented.",
+    });
   };
 
   return (
-    <div className="relative p-3">
-      <input 
-        type="file"
-        ref={fileInputRef}
-        onChange={handleFileChange}
-        className="hidden"
-        accept="image/*,.pdf,.doc,.docx,.txt"
-      />
-      
-      {/* Self-destruct menu */}
-      {showSelfDestructMenu && (
-        <div className="absolute bottom-full mb-2 right-4 glass-card rounded-lg shadow-lg p-2 animate-fade-in z-10">
-          <div className="p-2 border-b border-border mb-1">
-            <h4 className="text-sm font-medium">Self-destruct timer</h4>
-          </div>
-          <div className="space-y-1">
-            <button
-              onClick={() => handleSelfDestructTimeChange(30)}
-              className="w-full text-left text-sm px-3 py-1 rounded hover:bg-secondary/50 transition-colors"
-            >
-              30 seconds
-            </button>
-            <button
-              onClick={() => handleSelfDestructTimeChange(60)}
-              className="w-full text-left text-sm px-3 py-1 rounded hover:bg-secondary/50 transition-colors"
-            >
-              1 minute
-            </button>
-            <button
-              onClick={() => handleSelfDestructTimeChange(300)}
-              className="w-full text-left text-sm px-3 py-1 rounded hover:bg-secondary/50 transition-colors"
-            >
-              5 minutes
-            </button>
-            <button
-              onClick={() => handleSelfDestructTimeChange(3600)}
-              className="w-full text-left text-sm px-3 py-1 rounded hover:bg-secondary/50 transition-colors"
-            >
-              1 hour
-            </button>
-            <button
-              onClick={() => toggleSelfDestruct()}
-              className="w-full text-left text-sm px-3 py-1 rounded hover:bg-secondary/50 transition-colors text-destructive"
-            >
-              {isSelfDestructEnabled ? 'Turn off' : 'Cancel'}
-            </button>
-          </div>
+    <div className="p-4 border-t border-border">
+      {selfDestruct && (
+        <div className="flex items-center text-xs text-primary mb-2">
+          <Clock className="w-3.5 h-3.5 mr-1" />
+          <span>
+            This message will self-destruct after {selfDestruct / 60} {selfDestruct / 60 === 1 ? 'minute' : 'minutes'}
+          </span>
+          <button 
+            className="ml-2 text-muted-foreground hover:text-destructive" 
+            onClick={() => setSelfDestruct(undefined)}
+          >
+            Cancel
+          </button>
         </div>
       )}
-
-      <div className="flex items-end gap-2 glass-card p-2 rounded-2xl">
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="p-2 rounded-full hover:bg-secondary/50 transition-colors"
-          aria-label="Attach file"
-          disabled={isUploading}
-        >
-          {isUploading ? (
-            <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-          ) : (
-            <Paperclip className="w-5 h-5" />
-          )}
-        </button>
-        
-        <div className="relative flex-1">
-          <textarea
+      
+      <div className="flex items-end space-x-2">
+        <div className="flex-1 relative">
+          <Textarea
+            ref={textareaRef}
+            placeholder="Type a message..."
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a secure message..."
-            className="w-full text-sm resize-none bg-transparent border-0 focus:ring-0 min-h-[44px] max-h-[150px] py-3 px-3 outline-none"
+            className="min-h-10 resize-none pr-10 py-3"
             rows={1}
-            disabled={isSending}
+            disabled={disabled}
           />
-          
-          {/* Encryption indicator */}
-          <div className="absolute bottom-1 right-1 flex items-center text-xs text-muted-foreground">
-            <Lock className="w-3 h-3 mr-1" />
-            <span>End-to-end encrypted</span>
-          </div>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="absolute right-1 bottom-1 h-8 w-8"
+                disabled={disabled}
+              >
+                <SmileIcon className="h-5 w-5 text-muted-foreground" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent 
+              side="top" 
+              className="w-full p-0" 
+              align="end"
+              sideOffset={8}
+            >
+              <EmojiPicker 
+                onEmojiClick={handleEmojiClick} 
+                emojiStyle={EmojiStyle.APPLE}
+                lazyLoadEmojis
+                skinTonesDisabled
+                searchDisabled={false}
+                width="100%"
+                height={350}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
-
-        <div className="flex items-center gap-1">
-          {/* Emoji button */}
-          <button
-            className="p-2 rounded-full hover:bg-secondary/50 transition-colors"
-            aria-label="Add emoji"
-          >
-            <Smile className="w-5 h-5" />
-          </button>
-          
-          {/* Self-destruct timer button */}
-          <button
-            onClick={() => setShowSelfDestructMenu(!showSelfDestructMenu)}
-            className={`p-2 rounded-full transition-colors ${
-              isSelfDestructEnabled 
-                ? 'bg-primary text-primary-foreground' 
-                : 'hover:bg-secondary/50'
-            }`}
-            aria-label="Set self-destruct timer"
-            disabled={isSending}
-          >
-            <TimerReset className="w-5 h-5" />
-          </button>
-          
-          {/* Send button */}
-          <button
-            onClick={handleSendMessage}
-            disabled={!message.trim() || isSending}
-            className={`p-2 rounded-full transition-colors ${
-              message.trim() && !isSending
-                ? 'bg-primary text-primary-foreground' 
-                : 'bg-muted text-muted-foreground cursor-not-allowed'
-            }`}
-            aria-label="Send message"
-          >
-            {isSending ? (
-              <div className="w-5 h-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin"></div>
-            ) : (
-              <Send className="w-5 h-5" />
-            )}
-          </button>
-        </div>
+        
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button 
+              variant="outline" 
+              size="icon" 
+              className="rounded-full"
+              disabled={disabled}
+            >
+              <PaperclipIcon className="h-5 w-5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
+              <File className="mr-2 h-4 w-4" />
+              <span>Document</span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={handleFileChange}
+                accept="*/*"
+              />
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => {
+              if (fileInputRef.current) {
+                fileInputRef.current.accept = "image/*";
+                fileInputRef.current.click();
+              }
+            }}>
+              <Image className="mr-2 h-4 w-4" />
+              <span>Image</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleCameraClick}>
+              <Camera className="mr-2 h-4 w-4" />
+              <span>Camera</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleVoiceRecord}>
+              <Mic className="mr-2 h-4 w-4" />
+              <span>{isRecording ? 'Stop Recording' : 'Voice Message'}</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button 
+              variant="outline" 
+              size="icon" 
+              className="rounded-full"
+              disabled={disabled}
+            >
+              <Clock className="h-5 w-5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => handleSetSelfDestruct(1)}>
+              <span>1 minute</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleSetSelfDestruct(5)}>
+              <span>5 minutes</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleSetSelfDestruct(30)}>
+              <span>30 minutes</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleSetSelfDestruct(60)}>
+              <span>1 hour</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleSetSelfDestruct(24 * 60)}>
+              <span>24 hours</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        
+        <Button 
+          variant="default" 
+          size="icon" 
+          className="rounded-full"
+          onClick={handleSend}
+          disabled={(!message.trim() && !selfDestruct) || disabled}
+        >
+          <SendIcon className="h-5 w-5" />
+        </Button>
       </div>
-      
-      {/* Show active self-destruct timer */}
-      {isSelfDestructEnabled && (
-        <div className="mt-2 flex items-center justify-end gap-2 text-xs text-muted-foreground">
-          <Clock className="w-3 h-3" />
-          <span>
-            Message will self-destruct after {selfDestructTime === 60 
-              ? '1 minute' 
-              : selfDestructTime === 3600 
-                ? '1 hour' 
-                : `${selfDestructTime} seconds`}
-          </span>
-          <button 
-            onClick={() => setIsSelfDestructEnabled(false)}
-            className="p-1 hover:text-foreground transition-colors"
-            aria-label="Disable self-destruct"
-          >
-            <X className="w-3 h-3" />
-          </button>
-        </div>
-      )}
     </div>
   );
 };
